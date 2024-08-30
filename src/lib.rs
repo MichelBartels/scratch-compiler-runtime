@@ -2,7 +2,7 @@ use std::ffi::{c_void, CStr};
 use std::io::{self, BufRead, Write};
 
 #[no_mangle]
-pub extern "C" fn alloc_string(c_str: *const i8) -> *mut c_void {
+pub extern "C" fn alloc_string(c_str: *const u8) -> *mut c_void {
     let c_str = unsafe { CStr::from_ptr(c_str) };
     let str = c_str.to_str().unwrap().to_owned();
     let boxed_str = Box::new(str);
@@ -242,4 +242,19 @@ pub extern "C" fn string_eq(string1: *const c_void, string2: *const c_void) -> b
     let string1 = unsafe { &*(string1 as *const String) };
     let string2 = unsafe { &*(string2 as *const String) };
     string1 == string2
+}
+
+#[no_mangle]
+pub extern "C" fn spawn_thread(unsafe_fn: extern "C" fn()) -> *mut c_void {
+    let handle = std::thread::spawn(move || {
+        unsafe_fn();
+    });
+    let boxed_handle = Box::new(handle);
+    Box::into_raw(boxed_handle) as *mut c_void
+}
+
+#[no_mangle]
+pub extern "C" fn join_thread(handle: *mut c_void) {
+    let handle = unsafe { Box::from_raw(handle as *mut std::thread::JoinHandle<()>) };
+    handle.join().unwrap();
 }
