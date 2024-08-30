@@ -1,4 +1,5 @@
 use std::ffi::{c_void, CStr};
+use std::fmt::Debug;
 use std::io::{self, BufRead, Write};
 
 #[no_mangle]
@@ -29,7 +30,9 @@ pub extern "C" fn ask(question: *const c_void, answer: *mut c_void) {
     io::stdout().flush().unwrap();
     let mut input = String::new();
     io::stdin().lock().read_line(&mut input).unwrap();
+    println!("Input was: {}", input);
     let input = input.trim().to_owned();
+    println!("Now owned");
     unsafe {
         *(answer as *mut String) = input;
     }
@@ -76,14 +79,21 @@ pub extern "C" fn clear_bool_vec(ptr: *mut c_void) {
     clear_vec::<bool>(ptr);
 }
 
-fn push_to_vec<T: std::fmt::Debug>(ptr: *mut c_void, value: T) {
-    let vec = unsafe { &mut *(ptr as *mut Vec<T>) };
+fn push_to_vec<T: Debug>(ptr: *mut c_void, value: T) {
+    let ptr = ptr.cast::<Vec<T>>();
+    let vec = unsafe { ptr.as_mut().expect("Failed to get mut reference") };
+    println!("Pushing to vec: {:?}", vec);
+    println!("Vec capacity: {:?}", vec.capacity());
     vec.push(value);
+    println!("New vec capacity: {:?}", vec.capacity());
+    println!("New vec: {:?}", vec);
 }
 
 #[no_mangle]
 pub extern "C" fn push_to_string_vec(ptr: *mut c_void, value: *const c_void) {
+    println!("vec address: {:p}", ptr);
     let value = unsafe { &*(value as *const String) };
+    println!("Pushing to vec: {:?}", value);
     push_to_vec(ptr, value.clone());
 }
 
@@ -120,15 +130,22 @@ pub extern "C" fn get_bool_vec_element(ptr: *mut c_void, index: f64) -> bool {
     *vec.get(index).unwrap_or(&false)
 }
 
-fn index_of<T: PartialEq>(vec: *mut c_void, value: T) -> f64 {
+fn index_of<T: PartialEq + Debug>(vec: *mut c_void, value: T) -> f64 {
     let vec = unsafe { &*(vec as *const Vec<T>) };
+    println!("{:?}", vec);
+    println!("got vec and going to get position");
     vec.iter().position(|x| *x == value).map(|i| i as f64 + 1.0).unwrap_or(0.0)
 }
 
 #[no_mangle]
 pub extern "C" fn index_of_string(vec: *mut c_void, value: *const c_void) -> f64 {
+    println!("index_of_string");
+    println!("address of vec: '{:p}'", vec);
     let value = unsafe { &*(value as *const String) };
-    index_of(vec, value.clone())
+    println!("got value, {:?}", value);
+    let index = index_of(vec, value.clone());
+    println!("got index");
+    index
 }
 
 #[no_mangle]
