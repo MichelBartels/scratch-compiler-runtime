@@ -1,6 +1,7 @@
 use std::ffi::{c_void, CStr};
 use std::fmt::Debug;
 use std::io::{self, BufRead, Write};
+use std::sync::RwLock;
 
 #[no_mangle]
 pub extern "C" fn alloc_string(c_str: *const i8) -> *mut c_void {
@@ -36,9 +37,10 @@ pub extern "C" fn ask(question: *const c_void, answer: *mut c_void) {
     }
 }
 
+
 fn alloc_empty_vec<T>() -> *mut c_void {
     let vec: Vec<T> = Vec::new();
-    let boxed_vec = Box::new(vec);
+    let boxed_vec = Box::new(RwLock::new(vec));
     Box::into_raw(boxed_vec) as *mut c_void
 }
 
@@ -58,7 +60,9 @@ pub extern "C" fn alloc_empty_bool_vec() -> *mut c_void {
 }
 
 fn clear_vec<T: std::fmt::Debug>(ptr: *mut c_void) {
-    let vec = unsafe { &mut *(ptr as *mut Vec<T>) };
+    let ptr = ptr.cast::<RwLock<Vec<T>>>();
+    let rwlock = unsafe { ptr.as_ref().unwrap() };
+    let mut vec = rwlock.write().unwrap();
     vec.clear();
 }
 
@@ -78,8 +82,9 @@ pub extern "C" fn clear_bool_vec(ptr: *mut c_void) {
 }
 
 fn push_to_vec<T: Debug>(ptr: *mut c_void, value: T) {
-    let ptr = ptr.cast::<Vec<T>>();
-    let vec = unsafe { ptr.as_mut().expect("Failed to get mut reference") };
+    let ptr = ptr.cast::<RwLock<Vec<T>>>();
+    let rwlock = unsafe { ptr.as_ref().unwrap() };
+    let mut vec = rwlock.write().unwrap();
     vec.push(value);
 }
 
@@ -99,31 +104,35 @@ pub extern "C" fn push_to_bool_vec(ptr: *mut c_void, value: bool) {
     push_to_vec(ptr, value);
 }
 
+fn get_vec_element<T: Clone>(ptr: *mut c_void, index: f64, default: T) -> T {
+    let ptr = ptr.cast::<RwLock<Vec<T>>>();
+    let rwlock = unsafe { ptr.as_ref().unwrap() };
+    let vec = rwlock.read().unwrap();
+    let index = index as usize - 1;
+    vec.get(index).map(|x| x.clone()).unwrap_or(default)
+}
+
 #[no_mangle]
 pub extern "C" fn get_string_vec_element(ptr: *mut c_void, index: f64) -> *mut c_void {
-    let vec = unsafe { &*(ptr as *const Vec<String>) };
-    let index = index as usize - 1;
-    let element = vec.get(index).map(|str| str.to_string()).unwrap_or("".to_string());
-    let boxed_str = Box::new(element.clone());
-    Box::into_raw(boxed_str) as *mut c_void
+    let element = get_vec_element(ptr, index, "");
+    let boxed_element = Box::new(element);
+    Box::into_raw(boxed_element) as *mut c_void
 }
 
 #[no_mangle]
 pub extern "C" fn get_f64_vec_element(ptr: *mut c_void, index: f64) -> f64 {
-    let vec = unsafe { &*(ptr as *const Vec<f64>) };
-    let index = index as usize - 1;
-    *vec.get(index).unwrap_or(&0.0)
+    get_vec_element(ptr, index, 0.0)
 }
 
 #[no_mangle]
 pub extern "C" fn get_bool_vec_element(ptr: *mut c_void, index: f64) -> bool {
-    let vec = unsafe { &*(ptr as *const Vec<bool>) };
-    let index = index as usize - 1;
-    *vec.get(index).unwrap_or(&false)
+    get_vec_element(ptr, index, false)
 }
 
-fn index_of<T: PartialEq + Debug>(vec: *mut c_void, value: T) -> f64 {
-    let vec = unsafe { &*(vec as *const Vec<T>) };
+fn index_of<T: PartialEq + Debug>(ptr: *mut c_void, value: T) -> f64 {
+    let ptr = ptr.cast::<RwLock<Vec<T>>>();
+    let rwlock = unsafe { ptr.as_ref().unwrap() };
+    let vec = rwlock.read().unwrap();
     vec.iter().position(|x| *x == value).map(|i| i as f64 + 1.0).unwrap_or(0.0)
 }
 
@@ -145,7 +154,9 @@ pub extern "C" fn index_of_bool(vec: *mut c_void, value: bool) -> f64 {
 }
 
 fn set_vec_element<T>(ptr: *mut c_void, index: f64, value: T) {
-    let vec = unsafe { &mut *(ptr as *mut Vec<T>) };
+    let ptr = ptr.cast::<RwLock<Vec<T>>>();
+    let rwlock = unsafe { ptr.as_ref().unwrap() };
+    let mut vec = rwlock.write().unwrap();
     let index = index as usize - 1;
     if index < vec.len() {
         vec[index] = value;
@@ -169,7 +180,9 @@ pub extern "C" fn set_bool_vec_element(ptr: *mut c_void, index: f64, value: bool
 }
 
 fn len_of_vec<T: Debug>(ptr: *mut c_void) -> f64 {
-    let vec = unsafe { &*(ptr as *const Vec<T>) };
+    let ptr = ptr.cast::<RwLock<Vec<T>>>();
+    let rwlock = unsafe { ptr.as_ref().unwrap() };
+    let vec = rwlock.read().unwrap();
     vec.len() as f64
 }
 
