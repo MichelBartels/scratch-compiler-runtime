@@ -3,6 +3,12 @@ use std::fmt::Debug;
 use std::io::{self, BufRead, Write};
 use std::sync::RwLock;
 
+use macroquad::{
+    color,
+    window::{clear_background, next_frame},
+    Window,
+};
+
 #[no_mangle]
 pub extern "C" fn alloc_string(c_str: *const i8) -> *mut c_void {
     let c_str = unsafe { CStr::from_ptr(c_str) };
@@ -25,18 +31,16 @@ pub extern "C" fn say(ptr: *const c_void) {
 }
 
 #[no_mangle]
-pub extern "C" fn ask(question: *const c_void, answer: *mut c_void) {
+pub extern "C" fn ask(question: *const c_void) -> *mut c_void {
     let question = unsafe { &*(question as *const String) };
     print!("{} ", question);
     io::stdout().flush().unwrap();
     let mut input = String::new();
     io::stdin().lock().read_line(&mut input).unwrap();
     let input = input.trim().to_owned();
-    unsafe {
-        *(answer as *mut String) = input;
-    }
+    let boxed_input = Box::new(input);
+    Box::into_raw(boxed_input) as *mut c_void
 }
-
 
 fn alloc_empty_vec<T>() -> *mut c_void {
     let vec: Vec<T> = Vec::new();
@@ -104,7 +108,7 @@ pub extern "C" fn push_to_bool_vec(ptr: *mut c_void, value: bool) {
     push_to_vec(ptr, value);
 }
 
-fn get_vec_element<T: Clone>(ptr: *mut c_void, index: f64, default: T) -> T {
+fn get_vec_element<T: Clone + Debug>(ptr: *mut c_void, index: f64, default: T) -> T {
     let ptr = ptr.cast::<RwLock<Vec<T>>>();
     let rwlock = unsafe { ptr.as_ref().unwrap() };
     let vec = rwlock.read().unwrap();
@@ -114,7 +118,7 @@ fn get_vec_element<T: Clone>(ptr: *mut c_void, index: f64, default: T) -> T {
 
 #[no_mangle]
 pub extern "C" fn get_string_vec_element(ptr: *mut c_void, index: f64) -> *mut c_void {
-    let element = get_vec_element(ptr, index, "");
+    let element = get_vec_element(ptr, index, "".to_owned());
     let boxed_element = Box::new(element);
     Box::into_raw(boxed_element) as *mut c_void
 }
@@ -133,7 +137,10 @@ fn index_of<T: PartialEq + Debug>(ptr: *mut c_void, value: T) -> f64 {
     let ptr = ptr.cast::<RwLock<Vec<T>>>();
     let rwlock = unsafe { ptr.as_ref().unwrap() };
     let vec = rwlock.read().unwrap();
-    vec.iter().position(|x| *x == value).map(|i| i as f64 + 1.0).unwrap_or(0.0)
+    vec.iter()
+        .position(|x| *x == value)
+        .map(|i| i as f64 + 1.0)
+        .unwrap_or(0.0)
 }
 
 #[no_mangle]
@@ -203,7 +210,11 @@ pub extern "C" fn len_of_bool_vec(ptr: *mut c_void) -> f64 {
 
 fn cast_vec_to_string<T: ToString>(vec: *mut c_void) -> *mut c_void {
     let vec = unsafe { &*(vec as *const Vec<T>) };
-    let string = vec.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(", ");
+    let string = vec
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>()
+        .join(", ");
     let boxed_str = Box::new(string);
     Box::into_raw(boxed_str) as *mut c_void
 }
@@ -248,7 +259,11 @@ pub extern "C" fn join(string1: *const c_void, string2: *const c_void) -> *mut c
 pub extern "C" fn letter_of(string: *const c_void, index: f64) -> *mut c_void {
     let string = unsafe { &*(string as *const String) };
     let index = index as usize - 1;
-    let letter = string.chars().nth(index).map(|c| c.to_string()).unwrap_or("".to_string());
+    let letter = string
+        .chars()
+        .nth(index)
+        .map(|c| c.to_string())
+        .unwrap_or("".to_string());
     let boxed_str = Box::new(letter);
     Box::into_raw(boxed_str) as *mut c_void
 }
@@ -273,4 +288,24 @@ pub extern "C" fn spawn_thread(unsafe_fn: extern "C" fn()) -> *mut c_void {
 pub extern "C" fn join_thread(handle: *mut c_void) {
     let handle = unsafe { Box::from_raw(handle as *mut std::thread::JoinHandle<()>) };
     handle.join().unwrap();
+}
+
+#[no_mangle]
+fn create_window() {
+    Window::from_config(macroquad::conf::Conf {
+        miniquad_conf: miniquad::conf::Conf {
+            window_title: "Scratch".to_owned(),
+            window_width: 480,
+            window_height: 360,
+            high_dpi: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    }, window_loop());
+}
+async fn window_loop() {
+    loop {
+        clear_background(color::WHITE);
+        next_frame().await
+    }
 }
