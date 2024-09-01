@@ -1,4 +1,4 @@
-use std::ffi::{c_void, CStr};
+use std::ffi::{c_void, CStr, c_char};
 use std::fmt::Debug;
 use std::io::{self, BufRead, Write};
 use std::sync::RwLock;
@@ -10,7 +10,7 @@ use macroquad::{
 };
 
 #[no_mangle]
-pub extern "C" fn alloc_string(c_str: *const i8) -> *mut c_void {
+pub extern "C" fn alloc_string(c_str: *const c_char) -> *mut c_void {
     let c_str = unsafe { CStr::from_ptr(c_str) };
     let str = c_str.to_str().unwrap().to_owned();
     let boxed_str = Box::new(str);
