@@ -1,13 +1,10 @@
-use std::ffi::{c_void, CStr, c_char};
+use std::ffi::{c_char, c_void, CStr};
 use std::fmt::Debug;
 use std::io::{self, BufRead, Write};
 use std::sync::RwLock;
 
-use macroquad::{
-    color,
-    window::{clear_background, next_frame},
-    Window,
-};
+mod ui;
+pub use ui::{create_window, new_scene, new_sprite, scene_add_sprite};
 
 #[no_mangle]
 pub extern "C" fn alloc_string(c_str: *const c_char) -> *mut c_void {
@@ -288,24 +285,4 @@ pub extern "C" fn spawn_thread(unsafe_fn: extern "C" fn()) -> *mut c_void {
 pub extern "C" fn join_thread(handle: *mut c_void) {
     let handle = unsafe { Box::from_raw(handle as *mut std::thread::JoinHandle<()>) };
     handle.join().unwrap();
-}
-
-#[no_mangle]
-fn create_window() {
-    Window::from_config(macroquad::conf::Conf {
-        miniquad_conf: miniquad::conf::Conf {
-            window_title: "Scratch".to_owned(),
-            window_width: 480,
-            window_height: 360,
-            high_dpi: true,
-            ..Default::default()
-        },
-        ..Default::default()
-    }, window_loop());
-}
-async fn window_loop() {
-    loop {
-        clear_background(color::WHITE);
-        next_frame().await
-    }
 }
