@@ -5,7 +5,6 @@ use std::sync::RwLock;
 use std::thread::JoinHandle;
 
 mod ui;
-use ui::WrappedSprite;
 pub use ui::{create_window, new_scene, new_sprite, scene_add_sprite};
 
 #[no_mangle]
@@ -276,15 +275,9 @@ pub extern "C" fn string_eq(string1: *const String, string2: *const String) -> b
 }
 
 #[no_mangle]
-pub extern "C" fn spawn_thread(
-    unsafe_fn: extern "C" fn(*const WrappedSprite),
-    sprite: *const WrappedSprite,
-) -> *mut JoinHandle<()> {
-    let sprite = unsafe { &*sprite };
-    let sprite = sprite.clone();
-    let sprite = Box::new(sprite);
+pub extern "C" fn spawn_thread(unsafe_fn: extern "C" fn()) -> *mut JoinHandle<()> {
     let handle = std::thread::spawn(move || {
-        unsafe_fn(Box::into_raw(sprite));
+        unsafe_fn();
     });
     let boxed_handle = Box::new(handle);
     Box::into_raw(boxed_handle)
