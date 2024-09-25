@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, CStr};
 use std::fmt::Debug;
 use std::io::{self, BufRead, Write};
 use std::sync::RwLock;
@@ -29,7 +29,7 @@ pub extern "C" fn say(ptr: *const String) {
 }
 
 #[no_mangle]
-pub extern "C" fn ask(question: *const String) -> *mut c_void {
+pub extern "C" fn ask(question: *const String) -> *mut String {
     let question = unsafe { &*question };
     print!("{} ", question);
     io::stdout().flush().unwrap();
@@ -37,7 +37,7 @@ pub extern "C" fn ask(question: *const String) -> *mut c_void {
     io::stdin().lock().read_line(&mut input).unwrap();
     let input = input.trim().to_owned();
     let boxed_input = Box::new(input);
-    Box::into_raw(boxed_input) as *mut c_void
+    Box::into_raw(boxed_input)
 }
 
 fn alloc_empty_vec<T>() -> *mut RwLock<Vec<T>> {
