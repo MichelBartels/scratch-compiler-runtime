@@ -12,5 +12,7 @@ crate-type = ["staticlib"]
 macroquad = "0.4.13"
 miniquad = "0.4.6"
 quad-svg = "0.1.2"
+rand = "0.8.5"
 resvg = "0.43.0"
+unicode-linebreak = "0.1.5"
 

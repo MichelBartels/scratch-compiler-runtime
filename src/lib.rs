@@ -4,8 +4,9 @@ use std::io::{self, BufRead, Write};
 use std::sync::RwLock;
 use std::thread::JoinHandle;
 
+mod looks;
+mod motion;
 mod ui;
-pub use ui::{create_window, new_scene, new_sprite, scene_add_sprite};
 
 #[no_mangle]
 pub extern "C" fn alloc_string(c_str: *const c_char) -> *mut String {
