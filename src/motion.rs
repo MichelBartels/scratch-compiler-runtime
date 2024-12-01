@@ -6,13 +6,6 @@ use std::{
 use super::ui::*;
 
 #[no_mangle]
-pub fn motion_add_costume(sprite: *const WrappedSprite, costume: *mut Costume) {
-    let sprite = unsafe { &*sprite };
-    let costume = unsafe { Box::from_raw(costume) };
-    sprite.write().unwrap().costumes.push(*costume)
-}
-
-#[no_mangle]
 pub fn motion_set_x(sprite: *const WrappedSprite, x: f64) {
     let sprite = unsafe { &*sprite };
     let mut sprite = sprite.write().unwrap();
@@ -121,9 +114,13 @@ pub fn motion_glide_to_sprite(
 }
 
 #[no_mangle]
-pub fn motion_glide_to_cursor(sprite: *const WrappedSprite, scene: *const Scene, duration: f64) {
+pub fn motion_glide_to_cursor(
+    sprite: *const WrappedSprite,
+    scene: *const WrappedScene,
+    duration: f64,
+) {
     let (x, y) = {
-        let cursor = unsafe { &*scene }.cursor.read().unwrap();
+        let cursor = unsafe { &*scene }.read().unwrap().cursor;
         (cursor.0, cursor.1)
     };
     motion_glide_to_xy(sprite, x as f64, y as f64, duration);
@@ -153,11 +150,11 @@ pub fn motion_point_towards_sprite(sprite: *const WrappedSprite, target: *const 
 }
 
 #[no_mangle]
-pub fn motion_point_towards_cursor(sprite: *const WrappedSprite, scene: *const Scene) {
+pub fn motion_point_towards_cursor(sprite: *const WrappedSprite, scene: *const WrappedScene) {
     let sprite = unsafe { &*sprite };
     let mut sprite = sprite.write().unwrap();
-    let cursor = unsafe { &*scene }.cursor.read().unwrap();
-    sprite.point_towards(cursor.0, 180.0);
+    let cursor = unsafe { &*scene }.read().unwrap().cursor;
+    sprite.point_towards(cursor.0, cursor.1);
 }
 
 #[no_mangle]
@@ -187,10 +184,10 @@ pub fn motion_go_to_sprite(sprite: *const WrappedSprite, target: *const WrappedS
 }
 
 #[no_mangle]
-pub fn motion_go_to_cursor(sprite: *const WrappedSprite, scene: *const Scene) {
+pub fn motion_go_to_cursor(sprite: *const WrappedSprite, scene: *const WrappedScene) {
     let sprite = unsafe { &*sprite };
     let mut sprite = sprite.write().unwrap();
-    let cursor = unsafe { &*scene }.cursor.read().unwrap();
+    let cursor = unsafe { &*scene }.read().unwrap().cursor;
     sprite.position = Position::Constant(cursor.0 - 240.0, 180.0 - cursor.1);
 }
 

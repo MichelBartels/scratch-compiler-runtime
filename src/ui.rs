@@ -12,16 +12,18 @@ use macroquad::{
 
 use crate::looks::{Boundary, Bubble};
 
+const res_scale: u32 = 4;
+
 fn svg_to_texture(svg_str: &str) -> Texture2D {
     let opt = resvg::usvg::Options::default();
     let tree = resvg::usvg::Tree::from_str(svg_str, &opt).unwrap();
     let pixmap_size = tree.size().to_int_size();
     let mut pixmap =
-        resvg::tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height()).unwrap();
+        resvg::tiny_skia::Pixmap::new(pixmap_size.width() * res_scale, pixmap_size.height() * res_scale).unwrap();
 
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::default(),
+        resvg::tiny_skia::Transform::from_scale(res_scale as f32, res_scale as f32),
         &mut pixmap.as_mut(),
     );
     let png = pixmap.encode_png().unwrap();
@@ -61,7 +63,7 @@ impl Costume {
         Self { svg: LazyTexture::Unloaded(svg), rotation_center_x: rotation_center_x as f32, rotation_center_y: rotation_center_y as f32 }
     }
 
-    fn draw(&mut self, x: f32, y: f32, rotation: f32, rotation_style: RotationStyle) {
+    fn draw(&mut self, x: f32, y: f32, rotation: f32, rotation_style: RotationStyle, scale: f32) {
         let (rotation, flip_x) = match rotation_style {
             RotationStyle::AllAround => ((rotation - 90.) * PI / 180.0, false),
             RotationStyle::LeftRight => (0.0, match norm_angle(rotation) {
@@ -70,14 +72,17 @@ impl Costume {
             }),
             RotationStyle::DontRotate => (0.0, false),
         };
-        draw_texture_ex(self.svg.get_texture(), x, y, color::WHITE, DrawTextureParams {
+        let texture = self.svg.get_texture();
+        let size = texture.size() * scale / res_scale as f32;
+        draw_texture_ex(texture, x, y, color::WHITE, DrawTextureParams {
             rotation,
             pivot: Some(Vec2 {
-                x: self.rotation_center_x + x,
-                y: self.rotation_center_y + y,
+                x: self.rotation_center_x * scale + x,
+                y: self.rotation_center_y * scale + y,
 
             }),
             flip_x,
+            dest_size: Some(size),
             ..Default::default()
         })
     }
@@ -150,6 +155,9 @@ pub struct Sprite {
     pub direction: f32,
     pub rotation_style: RotationStyle,
     pub bubble: Option<Bubble>,
+    pub scale: f32,
+    pub shown: bool,
+    pub index: usize,
 }
 
 impl Sprite {
@@ -157,11 +165,14 @@ impl Sprite {
         &mut self.costumes[self.current_costume]
     }
     fn draw(&mut self, font: &Font) {
+        if !self.shown {
+            return;
+        }
         let costume = &mut self.costumes[self.current_costume];
         let (x, y) = self.position.get_position();
-        let x = 240. - costume.rotation_center_x + x;
-        let y = 180. - costume.rotation_center_y - y;
-        costume.draw(x, y, self.direction, self.rotation_style);
+        let x = 240. - costume.rotation_center_x * self.scale + x;
+        let y = 180. - costume.rotation_center_y * self.scale - y;
+        costume.draw(x, y, self.direction, self.rotation_style, self.scale);
         self.bubble.as_mut().map(|bubble| {
             let texture = costume.svg.get_texture();
             let boundary = Boundary {
@@ -192,51 +203,70 @@ pub fn new_sprite(current_costume: i32, x: f32, y: f32, direction: f32, rotation
         direction,
         rotation_style: RotationStyle::from_i32(rotation_style),
         bubble: None,
+        scale: 1.0,
+        shown: true,
+        index: 0 as usize,
     };
     let arc = Arc::new(RwLock::new(sprite));
     Box::into_raw(Box::new(arc))
 }
 
+#[no_mangle]
+pub fn sprite_add_costume(sprite: *const WrappedSprite, costume: *mut Costume) -> i32 {
+    let sprite = unsafe { &*sprite };
+    let costume = unsafe { Box::from_raw(costume) };
+    let mut sprite = sprite.write().unwrap();
+    sprite.costumes.push(*costume);
+    sprite.costumes.len() as i32 - 1
+
+}
+
 pub struct Scene {
-    sprites: Vec<WrappedSprite>,
-    pub cursor: RwLock<(f32, f32)>,
+    pub sprites: Vec<WrappedSprite>,
+    pub cursor: (f32, f32),
 }
 
 impl Scene {
-    fn draw(&self, font: &Font) {
+    fn draw(&mut self, font: &Font) {
         for sprite in self.sprites.iter() {
             sprite.write().unwrap().draw(font);
         }
-        *self.cursor.write().unwrap() = {
+        self.cursor = {
             let cursor = macroquad::input::mouse_position();
             (cursor.0 - 240.0, 180.0 - cursor.1)
         };
     }
 }
 
+pub type WrappedScene = RwLock<Scene>;
+
 #[no_mangle]
-pub fn new_scene() -> *const Scene {
-    Box::into_raw(Box::new(Scene { sprites: Vec::new(), cursor: RwLock::new((0., 0.))}))
+pub fn new_scene() -> *const WrappedScene {
+    Box::into_raw(Box::new(RwLock::new(Scene { sprites: Vec::new(), cursor: (0., 0.)})))
 }
 
 #[no_mangle]
-pub fn scene_add_sprite(scene: *mut Scene, sprite: *const WrappedSprite) {
-    let scene = unsafe { &mut *scene };
+pub fn scene_add_sprite(scene: *const WrappedScene, sprite: *const WrappedSprite) {
+    let scene = unsafe { &*scene };
+    let mut scene = scene.write().unwrap();
     let sprite = unsafe { &*sprite };
+    sprite.write().unwrap().index = scene.sprites.len();
     scene.sprites.push(sprite.clone());
 }
 
-async fn window_loop(scene: &Scene) {
+async fn window_loop(scene: &WrappedScene) {
     let font = load_ttf_font("helvetica.ttf").await.unwrap();
     loop {
         clear_background(color::WHITE);
-        scene.draw(&font);
+        {
+            scene.write().unwrap().draw(&font);
+        }
         next_frame().await
     }
 }
 
 #[no_mangle]
-pub fn create_window(scene: *const Scene) {
+pub fn create_window(scene: *const WrappedScene) {
     let scene = unsafe { &*scene };
     Window::from_config(macroquad::conf::Conf {
         miniquad_conf: miniquad::conf::Conf {

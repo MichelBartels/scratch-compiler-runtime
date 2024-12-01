@@ -1,3 +1,5 @@
+use std::thread;
+
 use macroquad::{
     color::{colors, Color},
     shapes::{draw_arc, draw_circle_lines, draw_line},
@@ -6,7 +8,7 @@ use macroquad::{
 };
 use unicode_linebreak::{linebreaks, BreakOpportunity};
 
-use crate::ui::WrappedSprite;
+use crate::ui::{WrappedScene, WrappedSprite};
 
 fn measure_width(text: &str, font: &Font) -> f32 {
     measure_text(text, Some(font), 16, 1.0).width
@@ -369,4 +371,152 @@ pub fn looks_say(sprite: *const WrappedSprite, text: *const String) {
     };
     let mut sprite = sprite.write().unwrap();
     sprite.bubble = Some(bubble);
+}
+
+#[no_mangle]
+pub fn looks_say_for_seconds(sprite: *const WrappedSprite, text: *const String, seconds: f64) {
+    let sprite = unsafe { &*sprite };
+    let text = unsafe { &*text };
+    let bubble = Bubble {
+        text: text.clone(),
+        bubble_type: BubbleType::Speech,
+        lines: None,
+    };
+    {
+        let mut sprite = sprite.write().unwrap();
+        sprite.bubble = Some(bubble);
+    };
+    thread::sleep(std::time::Duration::from_secs_f64(seconds));
+    let mut sprite = sprite.write().unwrap();
+    sprite.bubble = None;
+}
+
+#[no_mangle]
+pub fn looks_think(sprite: *const WrappedSprite, text: *const String) {
+    let sprite = unsafe { &*sprite };
+    let text = unsafe { &*text };
+    let bubble = Bubble {
+        text: text.clone(),
+        bubble_type: BubbleType::Thought,
+        lines: None,
+    };
+    let mut sprite = sprite.write().unwrap();
+    sprite.bubble = Some(bubble);
+}
+
+#[no_mangle]
+pub fn looks_think_for_seconds(sprite: *const WrappedSprite, text: *const String, seconds: f64) {
+    let sprite = unsafe { &*sprite };
+    let text = unsafe { &*text };
+    let bubble = Bubble {
+        text: text.clone(),
+        bubble_type: BubbleType::Thought,
+        lines: None,
+    };
+    {
+        let mut sprite = sprite.write().unwrap();
+        sprite.bubble = Some(bubble);
+    };
+    thread::sleep(std::time::Duration::from_secs_f64(seconds));
+    let mut sprite = sprite.write().unwrap();
+    sprite.bubble = None;
+}
+
+#[no_mangle]
+pub fn looks_switch_costume(sprite: *const WrappedSprite, costume: i32) {
+    let sprite = unsafe { &*sprite };
+    let mut sprite = sprite.write().unwrap();
+    sprite.current_costume = costume as usize;
+}
+
+#[no_mangle]
+pub fn looks_next_costume(sprite: *const WrappedSprite) {
+    let sprite = unsafe { &*sprite };
+    let mut sprite = sprite.write().unwrap();
+    sprite.current_costume = (sprite.current_costume + 1) % sprite.costumes.len();
+}
+
+#[no_mangle]
+pub fn looks_change_size_by(sprite: *const WrappedSprite, size: f64) {
+    let sprite = unsafe { &*sprite };
+    let mut sprite = sprite.write().unwrap();
+    sprite.scale += (size as f32) / 100.0;
+}
+
+#[no_mangle]
+pub fn looks_show(sprite: *const WrappedSprite) {
+    let sprite = unsafe { &*sprite };
+    sprite.write().unwrap().shown = true;
+}
+
+#[no_mangle]
+pub fn looks_hide(sprite: *const WrappedSprite) {
+    let sprite = unsafe { &*sprite };
+    sprite.write().unwrap().shown = false;
+}
+
+#[no_mangle]
+pub fn looks_go_to_front(sprite: *const WrappedSprite, scene: *const WrappedScene) {
+    let sprite = unsafe { &*sprite };
+    let scene = unsafe { &*scene };
+    let mut scene = scene.write().unwrap();
+    let sprite_index = {
+        let mut sprite = sprite.write().unwrap();
+        let old_index = sprite.index;
+        sprite.index = scene.sprites.len() - 1;
+        old_index
+    };
+    scene.sprites.remove(sprite_index);
+    scene.sprites.push(sprite.clone());
+}
+
+#[no_mangle]
+pub fn looks_go_to_back(sprite: *const WrappedSprite, scene: *const WrappedScene) {
+    let sprite = unsafe { &*sprite };
+    let scene = unsafe { &*scene };
+    let mut scene = scene.write().unwrap();
+    let sprite_index = {
+        let mut sprite = sprite.write().unwrap();
+        let old_index = sprite.index;
+        sprite.index = 0;
+        old_index
+    };
+    let sprite = scene.sprites.remove(sprite_index);
+    scene.sprites.insert(0, sprite);
+}
+
+fn looks_go_back_layers(sprite: *const WrappedSprite, scene: *const WrappedScene, layers: i32) {
+    let sprite = unsafe { &*sprite };
+    let scene = unsafe { &*scene };
+    let sprite_index = {
+        let sprite = sprite.read().unwrap();
+        sprite.index
+    };
+    let mut scene = scene.write().unwrap();
+    let new_index = (sprite_index as i32 - layers) as usize;
+    let new_index = new_index.max(0).min(scene.sprites.len() - 1);
+    {
+        let mut sprite = sprite.write().unwrap();
+        sprite.index = new_index;
+    }
+    let sprite = scene.sprites.remove(sprite_index);
+    scene.sprites.insert(new_index, sprite);
+}
+
+#[no_mangle]
+pub fn looks_go_back_layers_by(
+    sprite: *const WrappedSprite,
+    scene: *const WrappedScene,
+    layers: f64,
+) {
+    looks_go_back_layers(sprite, scene, layers as i32);
+}
+
+#[no_mangle]
+pub fn looks_go_forward_layers_by(
+    sprite: *const WrappedSprite,
+    scene: *const WrappedScene,
+    layers: f64,
+) {
+    looks_go_back_layers(sprite, scene, -layers as i32);
 }

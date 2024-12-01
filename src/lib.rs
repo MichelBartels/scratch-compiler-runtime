@@ -24,12 +24,6 @@ pub extern "C" fn free_string(ptr: *mut String) {
 }
 
 #[no_mangle]
-pub extern "C" fn say(ptr: *const String) {
-    let s = unsafe { &*ptr };
-    println!("{}", s);
-}
-
-#[no_mangle]
 pub extern "C" fn ask(question: *const String) -> *mut String {
     let question = unsafe { &*question };
     print!("{} ", question);
