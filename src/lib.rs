@@ -6,6 +6,8 @@ use std::thread::JoinHandle;
 
 mod looks;
 mod motion;
+mod operator;
+mod sensing;
 mod ui;
 
 #[no_mangle]
@@ -223,6 +225,11 @@ pub extern "C" fn cast_f64_vec_to_string(vec: *const RwLock<Vec<f64>>) -> *mut S
     cast_vec_to_string::<f64>(vec)
 }
 
+#[no_mangle]
+pub extern "C" fn cast_bool_vec_to_string(vec: *const RwLock<Vec<bool>>) -> *mut String {
+    cast_vec_to_string::<bool>(vec)
+}
+
 fn cast_to_string<T: ToString>(val: T) -> *mut String {
     let string = val.to_string();
     let boxed_str = Box::new(string);
@@ -238,6 +245,51 @@ pub extern "C" fn cast_f64_to_string(value: f64) -> *mut String {
 pub extern "C" fn cast_string_to_f64(value: *const String) -> f64 {
     let value = unsafe { &*(value) };
     value.parse().unwrap_or(0.0)
+}
+
+#[no_mangle]
+pub extern "C" fn cast_bool_to_string(value: bool) -> *mut String {
+    cast_to_string::<bool>(value)
+}
+
+#[no_mangle]
+pub extern "C" fn cast_string_to_bool(value: *const String) -> bool {
+    let value = unsafe { &*(value) };
+    value.parse().unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn cast_f64_to_bool(value: f64) -> bool {
+    value != 0.0
+}
+
+#[no_mangle]
+pub extern "C" fn cast_bool_to_f64(value: bool) -> f64 {
+    if value {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+fn vec_contains<T: PartialEq>(vec: *const RwLock<Vec<T>>, value: *const T) -> bool {
+    let value = unsafe { &*(value) };
+    let rwlock = unsafe { vec.as_ref().unwrap() };
+    let vec = rwlock.read().unwrap();
+    vec.contains(value)
+}
+
+#[no_mangle]
+pub extern "C" fn string_vec_contains(
+    vec: *const RwLock<Vec<String>>,
+    value: *const String,
+) -> bool {
+    vec_contains(vec, value)
+}
+
+#[no_mangle]
+pub extern "C" fn f64_vec_contains(vec: *const RwLock<Vec<f64>>, value: *const f64) -> bool {
+    vec_contains(vec, value)
 }
 
 #[no_mangle]
@@ -282,4 +334,10 @@ pub extern "C" fn spawn_thread(unsafe_fn: extern "C" fn()) -> *mut JoinHandle<()
 pub extern "C" fn join_thread(handle: *mut JoinHandle<()>) {
     let handle = unsafe { Box::from_raw(handle) };
     handle.join().unwrap();
+}
+
+#[no_mangle]
+pub extern "C" fn warn(message: *const String) {
+    let message = unsafe { &*(message) };
+    eprintln!("{}", message);
 }

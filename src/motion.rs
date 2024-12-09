@@ -152,8 +152,8 @@ pub fn motion_point_towards_sprite(sprite: *const WrappedSprite, target: *const 
 #[no_mangle]
 pub fn motion_point_towards_cursor(sprite: *const WrappedSprite, scene: *const WrappedScene) {
     let sprite = unsafe { &*sprite };
-    let mut sprite = sprite.write().unwrap();
     let cursor = unsafe { &*scene }.read().unwrap().cursor;
+    let mut sprite = sprite.write().unwrap();
     sprite.point_towards(cursor.0, cursor.1);
 }
 

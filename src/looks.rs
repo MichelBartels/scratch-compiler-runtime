@@ -423,9 +423,19 @@ pub fn looks_think_for_seconds(sprite: *const WrappedSprite, text: *const String
 }
 
 #[no_mangle]
-pub fn looks_switch_costume(sprite: *const WrappedSprite, costume: i32) {
+pub fn looks_switch_costume(sprite: *const WrappedSprite, costume: *const String) {
     let sprite = unsafe { &*sprite };
     let mut sprite = sprite.write().unwrap();
+    let costume = unsafe { &*costume };
+    let costume = sprite
+        .costumes
+        .iter()
+        .position(|c| c.name == *costume)
+        .unwrap_or_else(|| {
+            let index: f64 = costume.parse().unwrap_or(0.0);
+            let index = index as usize;
+            index.clamp(0, sprite.costumes.len() - 1)
+        });
     sprite.current_costume = costume as usize;
 }
 
@@ -519,4 +529,19 @@ pub fn looks_go_forward_layers_by(
     layers: f64,
 ) {
     looks_go_back_layers(sprite, scene, -layers as i32);
+}
+
+#[no_mangle]
+pub fn looks_costume_number_of(sprite: *const WrappedSprite) -> i32 {
+    let sprite = unsafe { &*sprite };
+    sprite.read().unwrap().current_costume as i32
+}
+
+#[no_mangle]
+pub fn looks_costume_name_of(sprite: *const WrappedSprite) -> *const String {
+    let sprite = unsafe { &*sprite };
+    let sprite = sprite.read().unwrap();
+    Box::into_raw(Box::new(
+        sprite.costumes[sprite.current_costume].name.clone(),
+    ))
 }

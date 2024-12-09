@@ -12,35 +12,46 @@ use macroquad::{
 
 use crate::looks::{Boundary, Bubble};
 
-const res_scale: u32 = 4;
+const RES_SCALE: u32 = 4;
 
 fn svg_to_texture(svg_str: &str) -> Texture2D {
     let opt = resvg::usvg::Options::default();
     let tree = resvg::usvg::Tree::from_str(svg_str, &opt).unwrap();
     let pixmap_size = tree.size().to_int_size();
     let mut pixmap =
-        resvg::tiny_skia::Pixmap::new(pixmap_size.width() * res_scale, pixmap_size.height() * res_scale).unwrap();
+        resvg::tiny_skia::Pixmap::new(pixmap_size.width() * RES_SCALE, pixmap_size.height() * RES_SCALE).unwrap();
 
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::from_scale(res_scale as f32, res_scale as f32),
+        resvg::tiny_skia::Transform::from_scale(RES_SCALE as f32, RES_SCALE as f32),
         &mut pixmap.as_mut(),
     );
     let png = pixmap.encode_png().unwrap();
     Texture2D::from_file_with_format(&png, Some(ImageFormat::Png))
 }
 
+fn png_to_texture(png: &[u8]) -> Texture2D {
+    let png_str = String::from_utf8_lossy(png);
+    Texture2D::from_file_with_format(png, Some(ImageFormat::Png))
+}
+
 enum LazyTexture {
     Loaded(Texture2D),
-    Unloaded(String),
+    SVG(String),
+    PNG(Vec<u8>)
 }
 
 impl LazyTexture {
     fn get_texture(&mut self) -> &Texture2D {
         match self {
             Self::Loaded(texture) => texture,
-            Self::Unloaded(svg) => {
+            Self::SVG(svg) => {
                 let texture = svg_to_texture(svg);
+                *self = Self::Loaded(texture);
+                self.get_texture()
+            },
+            Self::PNG(png) => {
+                let texture = png_to_texture(png);
                 *self = Self::Loaded(texture);
                 self.get_texture()
             }
@@ -53,16 +64,13 @@ pub fn norm_angle(angle: f32) -> f32 {
 }
 
 pub struct Costume {
-    pub svg: LazyTexture,
+    texture: LazyTexture,
     pub rotation_center_x: f32,
     pub rotation_center_y: f32,
+    pub name: String,
 }
 
 impl Costume {
-    fn new(svg: String, rotation_center_x: i32, rotation_center_y: i32) -> Self {
-        Self { svg: LazyTexture::Unloaded(svg), rotation_center_x: rotation_center_x as f32, rotation_center_y: rotation_center_y as f32 }
-    }
-
     fn draw(&mut self, x: f32, y: f32, rotation: f32, rotation_style: RotationStyle, scale: f32) {
         let (rotation, flip_x) = match rotation_style {
             RotationStyle::AllAround => ((rotation - 90.) * PI / 180.0, false),
@@ -72,8 +80,8 @@ impl Costume {
             }),
             RotationStyle::DontRotate => (0.0, false),
         };
-        let texture = self.svg.get_texture();
-        let size = texture.size() * scale / res_scale as f32;
+        let texture = self.texture.get_texture();
+        let size = texture.size() * scale / RES_SCALE as f32;
         draw_texture_ex(texture, x, y, color::WHITE, DrawTextureParams {
             rotation,
             pivot: Some(Vec2 {
@@ -89,10 +97,30 @@ impl Costume {
 }
 
 #[no_mangle]
-pub fn new_costume(svg_str: *const c_char, x: i32, y: i32) -> *const Costume {
+pub fn new_svg_costume(svg_str: *const c_char, x: f32, y: f32, name: *const c_char) -> *const Costume {
     let svg_str = unsafe { CStr::from_ptr(svg_str).to_str().unwrap().to_owned() };
-    let costume = Costume::new(svg_str, x, y);
+    let name = unsafe { CStr::from_ptr(name).to_str().unwrap().to_owned() };
+    let costume = Costume {
+        texture: LazyTexture::SVG(svg_str.clone()),
+        rotation_center_x: x,
+        rotation_center_y: y,
+        name,
+    };
     Box::into_raw(Box::new(costume))
+}
+
+#[no_mangle]
+pub fn new_png_costume(png: *const u8, len: i32, x: f32, y: f32, name: *const c_char) -> *const Costume {
+    let png = unsafe { std::slice::from_raw_parts(png, len as usize) };
+    let name = unsafe { CStr::from_ptr(name).to_str().unwrap().to_owned() };
+    let costume = Costume {
+        texture: LazyTexture::PNG(png.to_vec()),
+        rotation_center_x: x,
+        rotation_center_y: y,
+        name,
+    };
+    Box::into_raw(Box::new(costume))
+
 }
 
 pub enum Position {
@@ -174,7 +202,7 @@ impl Sprite {
         let y = 180. - costume.rotation_center_y * self.scale - y;
         costume.draw(x, y, self.direction, self.rotation_style, self.scale);
         self.bubble.as_mut().map(|bubble| {
-            let texture = costume.svg.get_texture();
+            let texture = costume.texture.get_texture();
             let boundary = Boundary {
                 x: x - costume.rotation_center_x,
                 y: y - costume.rotation_center_y,
