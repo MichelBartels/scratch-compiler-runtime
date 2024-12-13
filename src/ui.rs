@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 use std::ffi::{c_char, CStr};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use macroquad::math::Vec2;
@@ -16,7 +16,7 @@ const RES_SCALE: u32 = 4;
 
 fn svg_to_texture(svg_str: &str) -> Texture2D {
     let opt = resvg::usvg::Options::default();
-    let tree = resvg::usvg::Tree::from_str(svg_str, &opt).unwrap();
+    let tree = resvg::usvg::Tree::from_str(svg_str, &opt).expect(format!("Failed to parse SVG: {}", svg_str).as_str());
     let pixmap_size = tree.size().to_int_size();
     let mut pixmap =
         resvg::tiny_skia::Pixmap::new(pixmap_size.width() * RES_SCALE, pixmap_size.height() * RES_SCALE).unwrap();
@@ -31,30 +31,60 @@ fn svg_to_texture(svg_str: &str) -> Texture2D {
 }
 
 fn png_to_texture(png: &[u8]) -> Texture2D {
-    let png_str = String::from_utf8_lossy(png);
     Texture2D::from_file_with_format(png, Some(ImageFormat::Png))
 }
 
-enum LazyTexture {
-    Loaded(Texture2D),
+#[derive(Clone)]
+struct Texture {
+    texture: Arc<Texture2D>,
+    width: f32,
+    height: f32
+}
+
+enum InnerLazyTexture {
+    Loaded(Texture),
     SVG(String),
     PNG(Vec<u8>)
 }
 
+struct LazyTexture {
+    inner: Mutex<InnerLazyTexture>,
+    cv: Condvar
+}
+
 impl LazyTexture {
-    fn get_texture(&mut self) -> &Texture2D {
-        match self {
-            Self::Loaded(texture) => texture,
-            Self::SVG(svg) => {
-                let texture = svg_to_texture(svg);
-                *self = Self::Loaded(texture);
-                self.get_texture()
+    fn new(inner: InnerLazyTexture) -> Self {
+        Self {
+            inner: Mutex::new(inner),
+            cv: Condvar::new(),
+        }
+    }
+    fn load_texture(&self) {
+        let texture = match &*self.inner.lock().unwrap() {
+            InnerLazyTexture::Loaded(_) => panic!("Texture already loaded"),
+            InnerLazyTexture::SVG(svg) => {
+                svg_to_texture(&svg)
             },
-            Self::PNG(png) => {
-                let texture = png_to_texture(png);
-                *self = Self::Loaded(texture);
-                self.get_texture()
+            InnerLazyTexture::PNG(png) => {
+                png_to_texture(&png)
             }
+        };
+        let width = texture.width();
+        let height = texture.height();
+        *self.inner.lock().unwrap() = InnerLazyTexture::Loaded(Texture {
+            texture: Arc::new(texture),
+            width,
+            height
+        });
+        self.cv.notify_all();
+    }
+    fn get_texture(&self) -> Texture {
+        let texture = self.cv.wait_while(self.inner.lock().unwrap(), |inner| {
+            !matches!(inner, InnerLazyTexture::Loaded(_))
+        }).unwrap();
+        match &*texture {
+            InnerLazyTexture::Loaded(texture) => texture.clone(),
+            _ => panic!("Texture not loaded anymore"),
         }
     }
 }
@@ -71,18 +101,21 @@ pub struct Costume {
 }
 
 impl Costume {
-    fn draw(&mut self, x: f32, y: f32, rotation: f32, rotation_style: RotationStyle, scale: f32) {
-        let (rotation, flip_x) = match rotation_style {
+    fn rotation(&self, rotation: f32, rotation_style: RotationStyle) -> (f32, bool) {
+        match rotation_style {
             RotationStyle::AllAround => ((rotation - 90.) * PI / 180.0, false),
             RotationStyle::LeftRight => (0.0, match norm_angle(rotation) {
                 r if r < 0.0 => true,
                 _ => false,
             }),
             RotationStyle::DontRotate => (0.0, false),
-        };
-        let texture = self.texture.get_texture();
+        }
+    }
+    fn draw(&mut self, x: f32, y: f32, rotation: f32, rotation_style: RotationStyle, scale: f32) {
+        let (rotation, flip_x) = self.rotation(rotation, rotation_style);
+        let texture = self.texture.get_texture().texture;
         let size = texture.size() * scale / RES_SCALE as f32;
-        draw_texture_ex(texture, x, y, color::WHITE, DrawTextureParams {
+        draw_texture_ex(&texture, x, y, color::WHITE, DrawTextureParams {
             rotation,
             pivot: Some(Vec2 {
                 x: self.rotation_center_x * scale + x,
@@ -101,7 +134,7 @@ pub fn new_svg_costume(svg_str: *const c_char, x: f32, y: f32, name: *const c_ch
     let svg_str = unsafe { CStr::from_ptr(svg_str).to_str().unwrap().to_owned() };
     let name = unsafe { CStr::from_ptr(name).to_str().unwrap().to_owned() };
     let costume = Costume {
-        texture: LazyTexture::SVG(svg_str.clone()),
+        texture: LazyTexture::new(InnerLazyTexture::SVG(svg_str.clone())),
         rotation_center_x: x,
         rotation_center_y: y,
         name,
@@ -114,7 +147,7 @@ pub fn new_png_costume(png: *const u8, len: i32, x: f32, y: f32, name: *const c_
     let png = unsafe { std::slice::from_raw_parts(png, len as usize) };
     let name = unsafe { CStr::from_ptr(name).to_str().unwrap().to_owned() };
     let costume = Costume {
-        texture: LazyTexture::PNG(png.to_vec()),
+        texture: LazyTexture::new(InnerLazyTexture::PNG(png.to_vec())),
         rotation_center_x: x,
         rotation_center_y: y,
         name,
@@ -189,26 +222,34 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    fn costume(&mut self) -> &mut Costume {
-        &mut self.costumes[self.current_costume]
+    fn load_textures(&self) {
+        self.costumes.iter().for_each(|costume| {
+            costume.texture.load_texture();
+        });
+    }
+    fn boundary(&self) -> Boundary {
+        let (x, y) = self.position.get_position();
+        let costume = &self.costumes[self.current_costume];
+        let x = 240. - costume.rotation_center_x * self.scale + x;
+        let y = 180. - costume.rotation_center_y * self.scale - y;
+        let (rotation, _) = costume.rotation(self.direction, self.rotation_style);
+        let texture = costume.texture.get_texture();
+        Boundary {
+            x,
+            y,
+            width: texture.width,
+            height: texture.height,
+            rotation,
+        }
     }
     fn draw(&mut self, font: &Font) {
         if !self.shown {
             return;
         }
+        let boundary = self.boundary();
         let costume = &mut self.costumes[self.current_costume];
-        let (x, y) = self.position.get_position();
-        let x = 240. - costume.rotation_center_x * self.scale + x;
-        let y = 180. - costume.rotation_center_y * self.scale - y;
-        costume.draw(x, y, self.direction, self.rotation_style, self.scale);
+        costume.draw(boundary.x, boundary.y, self.direction, self.rotation_style, self.scale);
         self.bubble.as_mut().map(|bubble| {
-            let texture = costume.texture.get_texture();
-            let boundary = Boundary {
-                x: x - costume.rotation_center_x,
-                y: y - costume.rotation_center_y,
-                width: texture.width(),
-                height: texture.height(),
-            };
             bubble.draw(boundary, font);
         });
     }
@@ -217,6 +258,10 @@ impl Sprite {
         let dx = x - current_x;
         let dy = y - current_y;
         self.direction = 90.0 - dy.atan2(dx).to_degrees();
+    }
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        let boundary = self.boundary();
+        boundary.contains(x, y)
     }
 }
 
@@ -284,6 +329,12 @@ pub fn scene_add_sprite(scene: *const WrappedScene, sprite: *const WrappedSprite
 
 async fn window_loop(scene: &WrappedScene) {
     let font = load_ttf_font("helvetica.ttf").await.unwrap();
+    scene.read().unwrap().sprites.iter().for_each(|sprite| {
+        println!("acquiring sprite");
+        let sprite = sprite.read().unwrap();
+        println!("acquired sprite");
+        sprite.load_textures();
+    });
     loop {
         clear_background(color::WHITE);
         {

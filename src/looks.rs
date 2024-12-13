@@ -103,6 +103,17 @@ pub struct Boundary {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub rotation: f32,
+}
+
+impl Boundary {
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        let x = x - self.x;
+        let y = y - self.y;
+        let x = x * self.rotation.cos() - y * self.rotation.sin();
+        let y = x * self.rotation.sin() + y * self.rotation.cos();
+        x >= 0.0 && x <= self.width && y >= 0.0 && y <= self.height
+    }
 }
 
 impl Bubble {

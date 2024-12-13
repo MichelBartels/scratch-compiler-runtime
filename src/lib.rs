@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Write};
 use std::sync::RwLock;
 use std::thread::JoinHandle;
 
+mod event;
 mod looks;
 mod motion;
 mod operator;
