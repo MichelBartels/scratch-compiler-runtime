@@ -32,14 +32,14 @@ pub extern "C" fn operator_round(value: f64) -> f64 {
 }
 
 #[no_mangle]
-pub extern "C" fn operator_contains(str: *const String, substr: *const String) -> bool {
-    let str = unsafe { &*str };
-    let substr = unsafe { &*substr };
-    str.contains(substr)
+pub extern "C" fn operator_contains(str: *mut String, substr: *mut String) -> bool {
+    let str = unsafe { Box::from_raw(str) };
+    let substr = unsafe { Box::from_raw(substr) };
+    str.contains(&*substr)
 }
 
 #[no_mangle]
-pub extern "C" fn operator_length(str: *const String) -> usize {
+pub extern "C" fn operator_length(str: *mut String) -> usize {
     let str = unsafe { &*str };
     str.len()
 }

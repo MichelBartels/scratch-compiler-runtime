@@ -1,3 +1,5 @@
+use crate::ui::WrappedSprite;
+
 pub struct Broadcast(pub Vec<extern "C" fn()>);
 
 #[no_mangle]
@@ -25,4 +27,11 @@ pub extern "C" fn event_broadcastandwait(broadcast: *const Broadcast) {
     let broadcast = unsafe { &(*broadcast).0 };
     let handles = broadcast.iter().map(|f| std::thread::spawn(move || f()));
     handles.for_each(|h| h.join().unwrap());
+}
+
+#[no_mangle]
+pub extern "C" fn event_whenthisspriteclicked(sprite: *const WrappedSprite, f: extern "C" fn()) {
+    let sprite = unsafe { &*sprite };
+    let mut sprite = sprite.write().unwrap();
+    sprite.on_click.push(f)
 }

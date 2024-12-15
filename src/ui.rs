@@ -3,20 +3,32 @@ use std::ffi::{c_char, CStr};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use resvg::usvg::Error::InvalidSize;
+
+use macroquad::input::is_mouse_button_released;
 use macroquad::math::Vec2;
 use macroquad::text::{load_ttf_font, Font};
 use macroquad::texture::{draw_texture_ex, DrawTextureParams};
 use macroquad::{
     color, prelude::ImageFormat, texture::Texture2D, window::{clear_background, next_frame}, Window
 };
+use miniquad::MouseButton;
 
 use crate::looks::{Boundary, Bubble};
 
 const RES_SCALE: u32 = 4;
 
-fn svg_to_texture(svg_str: &str) -> Texture2D {
+fn svg_to_texture(svg_str: &str) -> Option<Texture2D> {
     let opt = resvg::usvg::Options::default();
-    let tree = resvg::usvg::Tree::from_str(svg_str, &opt).expect(format!("Failed to parse SVG: {}", svg_str).as_str());
+    let tree = resvg::usvg::Tree::from_str(svg_str, &opt);
+    let tree = match tree {
+        Ok(tree) => tree,
+        Err(InvalidSize) => {
+            println!("Skipping SVG with invalid size");
+            return None
+        },
+        Err(e) => panic!("Failed to parse SVG: {}", e),
+    };
     let pixmap_size = tree.size().to_int_size();
     let mut pixmap =
         resvg::tiny_skia::Pixmap::new(pixmap_size.width() * RES_SCALE, pixmap_size.height() * RES_SCALE).unwrap();
@@ -27,7 +39,7 @@ fn svg_to_texture(svg_str: &str) -> Texture2D {
         &mut pixmap.as_mut(),
     );
     let png = pixmap.encode_png().unwrap();
-    Texture2D::from_file_with_format(&png, Some(ImageFormat::Png))
+    Some(Texture2D::from_file_with_format(&png, Some(ImageFormat::Png)))
 }
 
 fn png_to_texture(png: &[u8]) -> Texture2D {
@@ -44,7 +56,8 @@ struct Texture {
 enum InnerLazyTexture {
     Loaded(Texture),
     SVG(String),
-    PNG(Vec<u8>)
+    PNG(Vec<u8>),
+    None
 }
 
 struct LazyTexture {
@@ -61,29 +74,37 @@ impl LazyTexture {
     }
     fn load_texture(&self) {
         let texture = match &*self.inner.lock().unwrap() {
-            InnerLazyTexture::Loaded(_) => panic!("Texture already loaded"),
+            InnerLazyTexture::Loaded(_) | InnerLazyTexture::None => panic!("Texture already loaded"),
             InnerLazyTexture::SVG(svg) => {
                 svg_to_texture(&svg)
             },
             InnerLazyTexture::PNG(png) => {
-                png_to_texture(&png)
+                Some(png_to_texture(&png))
             }
         };
-        let width = texture.width();
-        let height = texture.height();
-        *self.inner.lock().unwrap() = InnerLazyTexture::Loaded(Texture {
-            texture: Arc::new(texture),
-            width,
-            height
-        });
+        match texture {
+            Some (texture) => {
+                let width = texture.width();
+                let height = texture.height();
+                *self.inner.lock().unwrap() = InnerLazyTexture::Loaded(Texture {
+                    texture: Arc::new(texture),
+                    width,
+                    height
+                });
+            },
+            None => {
+                *self.inner.lock().unwrap() = InnerLazyTexture::None;
+            }
+        }
         self.cv.notify_all();
     }
-    fn get_texture(&self) -> Texture {
+    fn get_texture(&self) -> Option<Texture> {
         let texture = self.cv.wait_while(self.inner.lock().unwrap(), |inner| {
-            !matches!(inner, InnerLazyTexture::Loaded(_))
+            !matches!(inner, InnerLazyTexture::Loaded(_)) && !matches!(inner, InnerLazyTexture::None)
         }).unwrap();
         match &*texture {
-            InnerLazyTexture::Loaded(texture) => texture.clone(),
+            InnerLazyTexture::Loaded(texture) => Some(texture.clone()),
+            InnerLazyTexture::None => None,
             _ => panic!("Texture not loaded anymore"),
         }
     }
@@ -113,19 +134,21 @@ impl Costume {
     }
     fn draw(&mut self, x: f32, y: f32, rotation: f32, rotation_style: RotationStyle, scale: f32) {
         let (rotation, flip_x) = self.rotation(rotation, rotation_style);
-        let texture = self.texture.get_texture().texture;
-        let size = texture.size() * scale / RES_SCALE as f32;
-        draw_texture_ex(&texture, x, y, color::WHITE, DrawTextureParams {
-            rotation,
-            pivot: Some(Vec2 {
-                x: self.rotation_center_x * scale + x,
-                y: self.rotation_center_y * scale + y,
+        if let Some(texture) = self.texture.get_texture() {
+            let texture = texture.texture;
+            let size = texture.size() * scale / RES_SCALE as f32;
+            draw_texture_ex(&texture, x, y, color::WHITE, DrawTextureParams {
+                rotation,
+                pivot: Some(Vec2 {
+                    x: self.rotation_center_x * scale + x,
+                    y: self.rotation_center_y * scale + y,
 
-            }),
-            flip_x,
-            dest_size: Some(size),
-            ..Default::default()
-        })
+                }),
+                flip_x,
+                dest_size: Some(size),
+                ..Default::default()
+            })
+        }
     }
 }
 
@@ -219,6 +242,7 @@ pub struct Sprite {
     pub scale: f32,
     pub shown: bool,
     pub index: usize,
+    pub on_click: Vec<extern "C" fn()>
 }
 
 impl Sprite {
@@ -233,13 +257,21 @@ impl Sprite {
         let x = 240. - costume.rotation_center_x * self.scale + x;
         let y = 180. - costume.rotation_center_y * self.scale - y;
         let (rotation, _) = costume.rotation(self.direction, self.rotation_style);
-        let texture = costume.texture.get_texture();
-        Boundary {
-            x,
-            y,
-            width: texture.width,
-            height: texture.height,
-            rotation,
+        match costume.texture.get_texture() {
+            Some(texture) => Boundary {
+                x,
+                y,
+                width: texture.width,
+                height: texture.height,
+                rotation,
+            },
+            None => Boundary {
+                x,
+                y,
+                width: 0.0,
+                height: 0.0,
+                rotation,
+            }
         }
     }
     fn draw(&mut self, font: &Font) {
@@ -261,7 +293,7 @@ impl Sprite {
     }
     pub fn contains(&self, x: f32, y: f32) -> bool {
         let boundary = self.boundary();
-        boundary.contains(x, y)
+        boundary.contains(x + 240.0, 180.0 - y)
     }
 }
 
@@ -279,6 +311,7 @@ pub fn new_sprite(current_costume: i32, x: f32, y: f32, direction: f32, rotation
         scale: 1.0,
         shown: true,
         index: 0 as usize,
+        on_click: Vec::new(),
     };
     let arc = Arc::new(RwLock::new(sprite));
     Box::into_raw(Box::new(arc))
@@ -330,15 +363,31 @@ pub fn scene_add_sprite(scene: *const WrappedScene, sprite: *const WrappedSprite
 async fn window_loop(scene: &WrappedScene) {
     let font = load_ttf_font("helvetica.ttf").await.unwrap();
     scene.read().unwrap().sprites.iter().for_each(|sprite| {
-        println!("acquiring sprite");
         let sprite = sprite.read().unwrap();
-        println!("acquired sprite");
         sprite.load_textures();
     });
     loop {
         clear_background(color::WHITE);
         {
             scene.write().unwrap().draw(&font);
+        }
+        let cursor = {
+            scene.read().unwrap().cursor
+        };
+        if is_mouse_button_released(MouseButton::Left) {
+            scene.read().unwrap().sprites.iter().filter(|sprite| {
+                let sprite = sprite.read().unwrap();
+                sprite.contains(cursor.0, cursor.1) && sprite.shown
+            }).max_by_key(|sprite| {
+                let sprite = sprite.read().unwrap();
+                sprite.index
+            }).map(|sprite| {
+                let sprite = sprite.read().unwrap();
+                sprite.on_click.iter().for_each(|f| {
+                    let f = *f;
+                    std::thread::spawn(move || f());
+                });
+            });
         }
         next_frame().await
     }

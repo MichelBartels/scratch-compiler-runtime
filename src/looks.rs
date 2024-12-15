@@ -372,11 +372,11 @@ impl Bubble {
 }
 
 #[no_mangle]
-pub fn looks_say(sprite: *const WrappedSprite, text: *const String) {
+pub fn looks_say(sprite: *const WrappedSprite, text: *mut String) {
     let sprite = unsafe { &*sprite };
-    let text = unsafe { &*text };
+    let text = unsafe { Box::from_raw(text) };
     let bubble = Bubble {
-        text: text.clone(),
+        text: *text,
         bubble_type: BubbleType::Speech,
         lines: None,
     };
@@ -385,11 +385,11 @@ pub fn looks_say(sprite: *const WrappedSprite, text: *const String) {
 }
 
 #[no_mangle]
-pub fn looks_say_for_seconds(sprite: *const WrappedSprite, text: *const String, seconds: f64) {
+pub fn looks_say_for_seconds(sprite: *const WrappedSprite, text: *mut String, seconds: f64) {
     let sprite = unsafe { &*sprite };
-    let text = unsafe { &*text };
+    let text = unsafe { Box::from_raw(text) };
     let bubble = Bubble {
-        text: text.clone(),
+        text: *text,
         bubble_type: BubbleType::Speech,
         lines: None,
     };
@@ -403,11 +403,11 @@ pub fn looks_say_for_seconds(sprite: *const WrappedSprite, text: *const String, 
 }
 
 #[no_mangle]
-pub fn looks_think(sprite: *const WrappedSprite, text: *const String) {
+pub fn looks_think(sprite: *const WrappedSprite, text: *mut String) {
     let sprite = unsafe { &*sprite };
-    let text = unsafe { &*text };
+    let text = unsafe { Box::from_raw(text) };
     let bubble = Bubble {
-        text: text.clone(),
+        text: *text,
         bubble_type: BubbleType::Thought,
         lines: None,
     };
@@ -416,11 +416,11 @@ pub fn looks_think(sprite: *const WrappedSprite, text: *const String) {
 }
 
 #[no_mangle]
-pub fn looks_think_for_seconds(sprite: *const WrappedSprite, text: *const String, seconds: f64) {
+pub fn looks_think_for_seconds(sprite: *const WrappedSprite, text: *mut String, seconds: f64) {
     let sprite = unsafe { &*sprite };
-    let text = unsafe { &*text };
+    let text = unsafe { Box::from_raw(text) };
     let bubble = Bubble {
-        text: text.clone(),
+        text: *text,
         bubble_type: BubbleType::Thought,
         lines: None,
     };
@@ -434,10 +434,10 @@ pub fn looks_think_for_seconds(sprite: *const WrappedSprite, text: *const String
 }
 
 #[no_mangle]
-pub fn looks_switch_costume(sprite: *const WrappedSprite, costume: *const String) {
+pub fn looks_switch_costume(sprite: *const WrappedSprite, costume: *mut String) {
     let sprite = unsafe { &*sprite };
     let mut sprite = sprite.write().unwrap();
-    let costume = unsafe { &*costume };
+    let costume = unsafe { Box::from_raw(costume) };
     let costume = sprite
         .costumes
         .iter()
@@ -462,6 +462,13 @@ pub fn looks_change_size_by(sprite: *const WrappedSprite, size: f64) {
     let sprite = unsafe { &*sprite };
     let mut sprite = sprite.write().unwrap();
     sprite.scale += (size as f32) / 100.0;
+}
+
+#[no_mangle]
+pub fn looks_set_size_to(sprite: *const WrappedSprite, size: f64) {
+    let sprite = unsafe { &*sprite };
+    let mut sprite = sprite.write().unwrap();
+    sprite.scale = (size as f32) / 100.0;
 }
 
 #[no_mangle]
@@ -549,7 +556,7 @@ pub fn looks_costume_number_of(sprite: *const WrappedSprite) -> i32 {
 }
 
 #[no_mangle]
-pub fn looks_costume_name_of(sprite: *const WrappedSprite) -> *const String {
+pub fn looks_costume_name_of(sprite: *const WrappedSprite) -> *mut String {
     let sprite = unsafe { &*sprite };
     let sprite = sprite.read().unwrap();
     Box::into_raw(Box::new(

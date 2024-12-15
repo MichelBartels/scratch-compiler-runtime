@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Write};
 use std::sync::RwLock;
 use std::thread::JoinHandle;
 
+mod data;
 mod event;
 mod looks;
 mod motion;
@@ -20,15 +21,15 @@ pub extern "C" fn alloc_string(c_str: *const c_char) -> *mut String {
 }
 
 #[no_mangle]
-pub extern "C" fn free_string(ptr: *mut String) {
-    unsafe {
-        let _ = Box::from_raw(ptr);
-    }
+pub extern "C" fn clone_string(string: *const String) -> *mut String {
+    let string = unsafe { &*string };
+    let cloned = string.clone();
+    Box::into_raw(Box::new(cloned))
 }
 
 #[no_mangle]
-pub extern "C" fn ask(question: *const String) -> *mut String {
-    let question = unsafe { &*question };
+pub extern "C" fn ask(question: *mut String) -> *mut String {
+    let question = unsafe { Box::from_raw(question) };
     print!("{} ", question);
     io::stdout().flush().unwrap();
     let mut input = String::new();
@@ -87,9 +88,9 @@ fn push_to_vec<T: Debug>(ptr: *mut RwLock<Vec<T>>, value: T) {
 }
 
 #[no_mangle]
-pub extern "C" fn push_to_string_vec(ptr: *mut RwLock<Vec<String>>, value: *const String) {
-    let value = unsafe { &*value };
-    push_to_vec(ptr, value.clone());
+pub extern "C" fn push_to_string_vec(ptr: *mut RwLock<Vec<String>>, value: *mut String) {
+    let value = unsafe { Box::from_raw(value) };
+    push_to_vec(ptr, *value);
 }
 
 #[no_mangle]
@@ -139,9 +140,9 @@ fn index_of<T: PartialEq + Debug>(ptr: *const RwLock<Vec<T>>, value: T) -> f64 {
 }
 
 #[no_mangle]
-pub extern "C" fn index_of_string(vec: *const RwLock<Vec<String>>, value: *const String) -> f64 {
-    let value = unsafe { &*value };
-    let index = index_of(vec, value.clone());
+pub extern "C" fn index_of_string(vec: *const RwLock<Vec<String>>, value: *mut String) -> f64 {
+    let value = unsafe { Box::from_raw(value) };
+    let index = index_of(vec, *value);
     index
 }
 
@@ -168,10 +169,10 @@ fn set_vec_element<T>(ptr: *const RwLock<Vec<T>>, index: f64, value: T) {
 pub extern "C" fn set_string_vec_element(
     ptr: *const RwLock<Vec<String>>,
     index: f64,
-    value: *const String,
+    value: *mut String,
 ) {
-    let value = unsafe { &*value };
-    set_vec_element(ptr, index, value.clone());
+    let value = unsafe { Box::from_raw(value) };
+    set_vec_element(ptr, index, *value);
 }
 
 #[no_mangle]
@@ -254,8 +255,8 @@ pub extern "C" fn cast_bool_to_string(value: bool) -> *mut String {
 }
 
 #[no_mangle]
-pub extern "C" fn cast_string_to_bool(value: *const String) -> bool {
-    let value = unsafe { &*(value) };
+pub extern "C" fn cast_string_to_bool(value: *mut String) -> bool {
+    let value = unsafe { Box::from_raw(value) };
     value.parse().unwrap_or(false)
 }
 
@@ -273,38 +274,40 @@ pub extern "C" fn cast_bool_to_f64(value: bool) -> f64 {
     }
 }
 
-fn vec_contains<T: PartialEq>(vec: *const RwLock<Vec<T>>, value: *const T) -> bool {
-    let value = unsafe { &*(value) };
+fn vec_contains<T: PartialEq>(vec: *const RwLock<Vec<T>>, value: T) -> bool {
     let rwlock = unsafe { vec.as_ref().unwrap() };
     let vec = rwlock.read().unwrap();
-    vec.contains(value)
+    vec.contains(&value)
 }
 
 #[no_mangle]
-pub extern "C" fn string_vec_contains(
-    vec: *const RwLock<Vec<String>>,
-    value: *const String,
-) -> bool {
+pub extern "C" fn string_vec_contains(vec: *const RwLock<Vec<String>>, value: *mut String) -> bool {
+    let value = unsafe { Box::from_raw(value) };
+    vec_contains(vec, *value)
+}
+
+#[no_mangle]
+pub extern "C" fn f64_vec_contains(vec: *const RwLock<Vec<f64>>, value: f64) -> bool {
     vec_contains(vec, value)
 }
 
 #[no_mangle]
-pub extern "C" fn f64_vec_contains(vec: *const RwLock<Vec<f64>>, value: *const f64) -> bool {
+pub extern "C" fn bool_vec_contains(vec: *const RwLock<Vec<bool>>, value: bool) -> bool {
     vec_contains(vec, value)
 }
 
 #[no_mangle]
-pub extern "C" fn join(string1: *const String, string2: *const String) -> *mut String {
-    let string1 = unsafe { &*(string1 as *const String) };
-    let string2 = unsafe { &*(string2 as *const String) };
+pub extern "C" fn join(string1: *mut String, string2: *mut String) -> *mut String {
+    let string1 = unsafe { Box::from_raw(string1) };
+    let string2 = unsafe { Box::from_raw(string2) };
     let joined = format!("{}{}", string1, string2);
     let boxed_str = Box::new(joined);
     Box::into_raw(boxed_str)
 }
 
 #[no_mangle]
-pub extern "C" fn letter_of(string: *const String, index: f64) -> *mut String {
-    let string = unsafe { &*(string) };
+pub extern "C" fn letter_of(string: *mut String, index: f64) -> *mut String {
+    let string = unsafe { Box::from_raw(string) };
     let index = index as usize - 1;
     let letter = string
         .chars()
@@ -316,9 +319,9 @@ pub extern "C" fn letter_of(string: *const String, index: f64) -> *mut String {
 }
 
 #[no_mangle]
-pub extern "C" fn string_eq(string1: *const String, string2: *const String) -> bool {
-    let string1 = unsafe { &*(string1) };
-    let string2 = unsafe { &*(string2) };
+pub extern "C" fn string_eq(string1: *mut String, string2: *mut String) -> bool {
+    let string1 = unsafe { Box::from_raw(string1) };
+    let string2 = unsafe { Box::from_raw(string2) };
     string1 == string2
 }
 
@@ -338,7 +341,7 @@ pub extern "C" fn join_thread(handle: *mut JoinHandle<()>) {
 }
 
 #[no_mangle]
-pub extern "C" fn warn(message: *const String) {
-    let message = unsafe { &*(message) };
-    eprintln!("{}", message);
+pub extern "C" fn warn(message: *mut String) {
+    let message = unsafe { Box::from_raw(message) };
+    //eprintln!("{}", message);
 }
