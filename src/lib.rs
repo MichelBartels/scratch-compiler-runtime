@@ -343,5 +343,5 @@ pub extern "C" fn join_thread(handle: *mut JoinHandle<()>) {
 #[no_mangle]
 pub extern "C" fn warn(message: *mut String) {
     let message = unsafe { Box::from_raw(message) };
-    //eprintln!("{}", message);
+    eprintln!("{}", message);
 }
